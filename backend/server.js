@@ -14,15 +14,35 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Cache the MongoDB connection for serverless invocations
+let dbConnectionPromise;
+
+const ensureDBConnection = async () => {
+  if (!dbConnectionPromise) {
+    dbConnectionPromise = connectDB().catch((error) => {
+      dbConnectionPromise = null;
+      throw error;
+    });
+  }
+
+  await dbConnectionPromise;
+};
+
 // Home route
-app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "MERN Task Manager API is running!"
-  });
+app.get("/", async (req, res, next) => {
+  try {
+    await ensureDBConnection();
+
+    res.status(200).json({
+      success: true,
+      message: "MERN Task Manager API is running!"
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-// Health check route
+// Health check
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -30,13 +50,11 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Authentication routes
+// API routes
 app.use("/api/auth", authRoutes);
-
-// Task API routes
 app.use("/api/tasks", taskRoutes);
 
-// Global error handler
+// Error handler
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.message);
 
@@ -46,7 +64,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Handle unknown routes
+// Unknown routes
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -54,22 +72,21 @@ app.use((req, res) => {
   });
 });
 
-// Start server after connecting to MongoDB
-const PORT = process.env.PORT || 5000;
+// Export the Express app for Vercel
+module.exports = app;
 
-const startServer = async () => {
-  try {
-    await connectDB();
+// Start a local server only when running directly
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
-      console.log("Auth API: http://localhost:5000/api/auth");
-      console.log("Task API: http://localhost:5000/api/tasks");
+  ensureDBConnection()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server running at http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error("Failed to start server:", error.message);
+      process.exit(1);
     });
-  } catch (error) {
-    console.error("Failed to start server:", error.message);
-    process.exit(1);
-  }
-};
-
-startServer();
+}
